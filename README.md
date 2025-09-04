@@ -71,9 +71,9 @@ CREATE TABLE subscribers (
 );
 ```
 
-## 🚀 Running the Application
 
-### Development Mode
+
+
 
 1. **Start the backend server:**
 ```bash
@@ -107,48 +107,9 @@ Subscribe to the newsletter
 }
 ```
 
-### `POST /api/send-now`
-Send newsletter immediately to a specific email
-```json
-{
-  "email": "user@example.com"
-}
-```
 
-### `POST /api/cron-dispatch`
-Trigger newsletter dispatch (for external cron services)
-```json
-Headers: {
-  "x-cron-secret": "your_secret_key"
-}
-```
 
-### `GET /`
-Health check endpoint
-```json
-{
-  "message": "Backend is running!"
-}
-```
 
-## ⚙️ Configuration
-
-### Environment Variables
-
-#### Backend (.env)
-- `SUPABASE_URL`: Your Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key
-- `SMTP_HOST`: SMTP server hostname
-- `SMTP_PORT`: SMTP server port (default: 587)
-- `SMTP_USER`: SMTP username
-- `SMTP_PASS`: SMTP password/app password
-- `FROM_EMAIL`: Sender email address
-- `ENABLE_INTERNAL_CRON`: Enable internal cron jobs (true/false)
-- `CRON_SECRET`: Secret key for cron endpoint security
-- `PORT`: Server port (default: 3000)
-
-#### Frontend (.env)
-- `VITE_API_URL`: Backend API URL
 
 
 
