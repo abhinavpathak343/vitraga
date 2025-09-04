@@ -112,7 +112,12 @@ async function getSubscribers() {
 
 // ---------------- Routes ----------------
 
-// Signup route
+// Add this near the other routes
+app.get('/', (req, res) => {
+    res.json({
+        message: 'Backend is running!'
+    });
+});
 app.post('/api/signup', async (req, res) => {
     try {
         const {
