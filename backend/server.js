@@ -232,81 +232,109 @@ app.post('/api/send-now', async (req, res) => {
     }
 });
 
-// ---------------- Cron Job ----------------
-cron.schedule('* * * * *', async () => {
-    try {
-        const nowUtc = DateTime.utc();
+// ---------------- Dispatcher (shared) ----------------
+async function dispatchDue() {
+    const nowUtc = DateTime.utc();
+    const {
+        data: subscribers,
+        error
+    } = await supabase
+        .from('subscribers')
+        .select('*')
+        .lte('next_send_at', nowUtc.toISO());
+    if (error) throw error;
+    if (!subscribers || !subscribers.length) return {
+        sent: 0
+    };
+
+    const entries = await fetchTimeline(10);
+    if (!entries.length) return {
+        sent: 0
+    };
+    const html = renderEmail(entries);
+
+    let sent = 0;
+    for (const sub of subscribers) {
+        await sendEmail(sub.email, 'GitHub Updates', html);
+        sent += 1;
+        // Compute next occurrence from previous next_send_at to avoid drift
+        let base = sub.next_send_at ?
+            DateTime.fromISO(sub.next_send_at, {
+                zone: 'utc'
+            }).setZone(sub.timezone) :
+            DateTime.now().setZone(sub.timezone);
+        let nextSend;
+        const [hour, minute] = String(sub.send_time).split(":").map(Number);
+        if (sub.frequency === "daily") {
+            nextSend = base.set({
+                hour,
+                minute,
+                second: 0,
+                millisecond: 0
+            }).plus({
+                days: 1
+            });
+        } else if (sub.frequency === "weekly" && sub.day_of_week !== null) {
+            nextSend = base.set({
+                hour,
+                minute,
+                second: 0,
+                millisecond: 0
+            }).plus({
+                weeks: 1
+            });
+        } else {
+            nextSend = DateTime.now().setZone(sub.timezone).plus({
+                days: 1
+            });
+        }
         const {
-            data: subscribers,
-            error
+            error: updateErr
         } = await supabase
             .from('subscribers')
-            .select('*')
-            .lte('next_send_at', nowUtc.toISO());
-        if (error) throw error;
-        if (!subscribers || !subscribers.length) return;
+            .update({
+                next_send_at: nextSend.toUTC().toISO()
+            })
+            .eq('id', sub.id);
+        if (updateErr) console.error('Failed to update next_send_at for', sub.email, updateErr);
+    }
+    return {
+        sent
+    };
+}
 
-        const entries = await fetchTimeline(5);
-        if (!entries.length) return;
-        const html = renderEmail(entries);
-
-        for (const sub of subscribers) {
-            await sendEmail(sub.email, 'GitHub Updates', html);
-
-            // Compute next occurrence from previous next_send_at to avoid drift
-            let base = sub.next_send_at ?
-                DateTime.fromISO(sub.next_send_at, {
-                    zone: 'utc'
-                }).setZone(sub.timezone) :
-                DateTime.now().setZone(sub.timezone);
-            let nextSend;
-            const [hour, minute] = String(sub.send_time).split(":").map(Number);
-
-            if (sub.frequency === "daily") {
-                // Move to next day at scheduled local time
-                nextSend = base.set({
-                    hour,
-                    minute,
-                    second: 0,
-                    millisecond: 0
-                }).plus({
-                    days: 1
-                });
-            } else if (sub.frequency === "weekly" && sub.day_of_week !== null) {
-                // Move to next week same weekday/time
-                nextSend = base.set({
-                    hour,
-                    minute,
-                    second: 0,
-                    millisecond: 0
-                }).plus({
-                    weeks: 1
-                });
-            } else {
-                // Fallback: schedule for 24h later
-                nextSend = DateTime.now().setZone(sub.timezone).plus({
-                    days: 1
-                });
-            }
-
-            const {
-                error: updateErr
-            } = await supabase
-                .from('subscribers')
-                .update({
-                    next_send_at: nextSend.toUTC().toISO()
-                })
-                .eq('id', sub.id);
-            if (updateErr) {
-                console.error('Failed to update next_send_at for', sub.email, updateErr);
-            }
+// Trigger dispatcher via HTTP (for Render Cron)
+app.post('/api/cron-dispatch', async (req, res) => {
+    try {
+        const requiredSecret = process.env.CRON_SECRET;
+        if (requiredSecret && req.headers['x-cron-secret'] !== requiredSecret) {
+            return res.status(401).json({
+                message: 'Unauthorized'
+            });
         }
-        console.log(`✅ Sent to ${subscribers.length} subscribers at ${nowUtc.toISO()}`);
+        const result = await dispatchDue();
+        res.json(result);
     } catch (err) {
-        console.error('Cron dispatcher error:', err);
+        console.error('Cron-dispatch endpoint error:', err);
+        res.status(500).json({
+            message: 'Dispatch failed'
+        });
     }
 });
 
+// ---------------- Cron Job ----------------
+if (process.env.ENABLE_INTERNAL_CRON === 'true') {
+    cron.schedule('* * * * *', async () => {
+        try {
+            const result = await dispatchDue();
+            if (result.sent) {
+                console.log(`✅ Sent to ${result.sent} subscribers via internal cron`);
+            }
+        } catch (err) {
+            console.error('Cron dispatcher error:', err);
+        }
+    });
+}
 
 
 // ---------------- Start Server ----------------
