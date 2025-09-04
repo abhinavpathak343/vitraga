@@ -91,16 +91,6 @@ npm run dev
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:3000
 
-```
-
-
-
-
-
-
-
-
-
 
 ## 📊 Database Schema
 
