@@ -139,10 +139,14 @@ app.post('/api/signup', async (req, res) => {
             });
         }
 
+        // 🔧 Fix timezone normalization
+        const normalizedTz = (timezone === "Asia/Calcutta") ? "Asia/Kolkata" : timezone;
+
         // Calculate next_send_at in UTC
         let nextSend;
         const [hour, minute] = send_time.split(":").map(Number);
-        const now = DateTime.now().setZone(timezone);
+        const now = DateTime.now().setZone(normalizedTz);
+
         if (frequency === "daily") {
             nextSend = now.set({
                 hour,
@@ -171,6 +175,7 @@ app.post('/api/signup', async (req, res) => {
                 message: 'Invalid frequency or day_of_week'
             });
         }
+
         const next_send_at = nextSend.toUTC().toISO();
 
         // Upsert to avoid duplicate rows and keep a single record per email
@@ -181,7 +186,7 @@ app.post('/api/signup', async (req, res) => {
             frequency,
             send_time,
             day_of_week,
-            timezone,
+            timezone: normalizedTz, // ✅ store fixed tz
             next_send_at
         }, {
             onConflict: 'email'
