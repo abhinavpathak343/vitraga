@@ -78,7 +78,7 @@ CREATE TABLE subscribers (
 1. **Start the backend server:**
 ```bash
 cd backend
-npm run dev
+npm start
 ```
 
 2. **Start the frontend development server:**
@@ -93,19 +93,7 @@ npm run dev
 
 ```
 
-## 📡 API Endpoints
 
-### `POST /api/signup`
-Subscribe to the newsletter
-```json
-{
-  "email": "user@example.com",
-  "frequency": "daily|weekly",
-  "send_time": "09:00",
-  "day_of_week": 1,
-  "timezone": "America/New_York"
-}
-```
 
 
 
