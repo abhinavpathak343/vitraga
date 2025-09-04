@@ -52,7 +52,7 @@ async function sendEmail(to, subject, html) {
 // ---------------- Helper: Fetch GitHub Timeline ----------------
 import fetch from 'node-fetch';
 
-async function fetchTimeline(limit = 5) {
+async function fetchTimeline(limit = 10) {
     try {
         const response = await fetch('https://api.github.com/events', {
             headers: {
@@ -168,18 +168,21 @@ app.post('/api/signup', async (req, res) => {
         }
         const next_send_at = nextSend.toUTC().toISO();
 
+        // Upsert to avoid duplicate rows and keep a single record per email
         const {
             error
-        } = await supabase.from('subscribers').insert({
+        } = await supabase.from('subscribers').upsert({
             email,
             frequency,
             send_time,
             day_of_week,
             timezone,
             next_send_at
+        }, {
+            onConflict: 'email'
         });
 
-        if (error && !/duplicate/i.test(error.message)) {
+        if (error) {
             return res.status(500).json({
                 message: 'Error saving email'
             });
@@ -237,42 +240,61 @@ cron.schedule('* * * * *', async () => {
             .lte('next_send_at', nowUtc.toISO());
         if (error) throw error;
         if (!subscribers || !subscribers.length) return;
+
         const entries = await fetchTimeline(5);
         if (!entries.length) return;
         const html = renderEmail(entries);
+
         for (const sub of subscribers) {
             await sendEmail(sub.email, 'GitHub Updates', html);
-            // Calculate next_send_at
+
+            // Compute next occurrence from previous next_send_at to avoid drift
+            let base = sub.next_send_at ?
+                DateTime.fromISO(sub.next_send_at, {
+                    zone: 'utc'
+                }).setZone(sub.timezone) :
+                DateTime.now().setZone(sub.timezone);
             let nextSend;
-            const [hour, minute] = sub.send_time.split(":").map(Number);
-            const userNow = DateTime.now().setZone(sub.timezone);
+            const [hour, minute] = String(sub.send_time).split(":").map(Number);
+
             if (sub.frequency === "daily") {
-                nextSend = userNow.set({
-                    hour,
-                    minute,
-                    second: 0,
-                    millisecond: 0
-                });
-                if (nextSend <= userNow) nextSend = nextSend.plus({
-                    days: 1
-                });
-            } else if (sub.frequency === "weekly" && sub.day_of_week !== null) {
-                let daysToAdd = (Number(sub.day_of_week) - userNow.weekday % 7 + 7) % 7;
-                nextSend = userNow.set({
+                // Move to next day at scheduled local time
+                nextSend = base.set({
                     hour,
                     minute,
                     second: 0,
                     millisecond: 0
                 }).plus({
-                    days: daysToAdd
+                    days: 1
                 });
-                if (nextSend <= userNow) nextSend = nextSend.plus({
+            } else if (sub.frequency === "weekly" && sub.day_of_week !== null) {
+                // Move to next week same weekday/time
+                nextSend = base.set({
+                    hour,
+                    minute,
+                    second: 0,
+                    millisecond: 0
+                }).plus({
                     weeks: 1
                 });
+            } else {
+                // Fallback: schedule for 24h later
+                nextSend = DateTime.now().setZone(sub.timezone).plus({
+                    days: 1
+                });
             }
-            await supabase.from('subscribers').update({
-                next_send_at: nextSend.toUTC().toISO()
-            }).eq('email', sub.email);
+
+            const {
+                error: updateErr
+            } = await supabase
+                .from('subscribers')
+                .update({
+                    next_send_at: nextSend.toUTC().toISO()
+                })
+                .eq('id', sub.id);
+            if (updateErr) {
+                console.error('Failed to update next_send_at for', sub.email, updateErr);
+            }
         }
         console.log(`✅ Sent to ${subscribers.length} subscribers at ${nowUtc.toISO()}`);
     } catch (err) {
